@@ -1,7 +1,6 @@
 package net.callofdroidy.deck;
 
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.content.res.Resources;
 import android.os.AsyncTask;
@@ -9,9 +8,6 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
-import android.view.View;
-import android.widget.RelativeLayout;
-import android.widget.TextView;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -22,6 +18,7 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.text.DecimalFormat;
 
 import dalvik.system.DexClassLoader;
 
@@ -38,8 +35,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         //setContentView(0x7f04001a);
 
-        new DownloadTask(this).execute("http://192.168.128.54:8000/plugin.apk");
-
+        LayoutInflater layoutInflater = (LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+        //new DownloadTask(this, layoutInflater).execute("http://192.168.128.54:8000/app-debug.apk");
+        new DownloadTask(this, layoutInflater).execute("http://192.168.128.54:8001/app-debug.apk");
     }
 
 
@@ -50,6 +48,8 @@ public class MainActivity extends AppCompatActivity {
             assetManager= AssetManager.class.newInstance();
             Method addAssetPath = AssetManager.class.getMethod("addAssetPath", String.class);
             addAssetPath.invoke(assetManager, path);
+
+            Log.e(TAG, "load guest resources: success");
         }catch (Exception e){
             e.printStackTrace();
         }
@@ -62,6 +62,10 @@ public class MainActivity extends AppCompatActivity {
 
         if(downloadTask != null && downloadTask.getStatus() == AsyncTask.Status.RUNNING)
             downloadTask.cancel(true);
+        // clear cache code
+        File downloadedApk = new File(getCacheDir().getAbsoluteFile() + File.separator + "plugin.apk");
+        if(downloadedApk.exists())
+            downloadedApk.delete();
     }
 
     @Override
@@ -78,11 +82,13 @@ public class MainActivity extends AppCompatActivity {
 
         private WeakReference<MainActivity> activityWeakReference;
         private MainActivity mainActivity;
+        private LayoutInflater layoutInflater;
         DexClassLoader dexClassLoader;
 
-        public DownloadTask(MainActivity activity) {
+        DownloadTask(MainActivity activity, LayoutInflater layoutInflater) {
             this.activityWeakReference = new WeakReference<MainActivity>(activity);
             this.mainActivity = activityWeakReference.get();
+            this.layoutInflater = layoutInflater;
         }
 
         @Override
@@ -108,12 +114,11 @@ public class MainActivity extends AppCompatActivity {
 
                 // download the file
                 inputStream = connection.getInputStream();
-
-                Log.e(TAG, "doInBackground: IS size: " + inputStream.available());
-
+                File downloadedApk = null;
                 if(mainActivity != null){
-                    File downloadedApk = new File(mainActivity.getCacheDir().getAbsoluteFile() + File.separator + "plugin.apk");
-                    if(!downloadedApk.exists()){
+                    downloadedApk = new File(mainActivity.getCacheDir().getAbsoluteFile() + File.separator + "plugin.apk");
+                    if(downloadedApk.exists()){
+                        downloadedApk.delete();
                         try{
                             downloadedApk.createNewFile();
                         }catch (Exception e){
@@ -138,6 +143,11 @@ public class MainActivity extends AppCompatActivity {
                         publishProgress((int) (total * 100 / fileLength));
                     outputStream.write(data, 0, count);
                 }
+                if(downloadedApk != null){
+                    DecimalFormat df = new DecimalFormat("#.##");
+                    float downloadSize = Float.parseFloat(df.format((float)downloadedApk.length() / 1024 / 1024));
+                    Log.e(TAG, "doInBackground: plugin apk size: " + downloadSize + " MB");
+                }
             } catch (Exception e) {
                 return e.toString();
             } finally {
@@ -159,20 +169,37 @@ public class MainActivity extends AppCompatActivity {
         protected void onPostExecute(String result){
             String pluginPath = mainActivity.getCacheDir().getAbsolutePath() + File.separator + "plugin.apk";
 
-            Log.e(TAG, "pluginPath: " + pluginPath);
-            //dexPath = "/data/data/net.callofdroidy.deck/cache/base.apk";
+            // try to load guest apk resources
             mainActivity.loadRes(pluginPath);
-            Log.e(TAG, "afterDownload: load res success");
 
+            GuestApkContainer guestClass = new GuestApkContainer(mainActivity, pluginPath);
+            guestClass.loadApk();
+            /*
             dexClassLoader = new DexClassLoader(pluginPath, mainActivity.getApplicationInfo().dataDir, null, mainActivity.getClass().getClassLoader());
             try{
                 Class<?> clazz = dexClassLoader.loadClass("callofdroidy.net.deviceinfo.PluginIds");
+
                 Method getMainLayoutId = clazz.getMethod("getMainLayoutId");
                 int mainLayoutId = (int) getMainLayoutId.invoke(clazz);
                 mainActivity.setContentView(mainLayoutId); //this is a lint warning, can be ignored
+                LinearLayout guestRootLayout = (LinearLayout) layoutInflater.inflate(mainLayoutId, null);
+
+                Method getButtonId = clazz.getMethod("getButtonId");
+                int buttonId = (int) getButtonId.invoke(clazz);
+
+
+                Button btn = (Button) guestRootLayout.findViewById(buttonId);
+                btn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View view) {
+                        Log.e(TAG, "onClick: clicked in deck");
+                    }
+                });
+
             }catch (Exception e){
                 e.printStackTrace();
             }
+            */
 
         }
     }
